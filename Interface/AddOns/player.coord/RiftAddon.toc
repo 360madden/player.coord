@@ -2,8 +2,9 @@ Identifier = "player.coord"
 Name = "Player Coord"
 Description = "A minimal, draggable coordinate overlay showing player position and zone."
 Author = "mrkoo"
-Version = "1.0"
+Version = "1.1"
 Environment = "4.0"
+SavedVariables = { PlayerCoordSettings = "character" }
 
 RunOnStartup = {
     "Main.lua"
