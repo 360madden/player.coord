@@ -1,0 +1,10 @@
+Identifier = "player.coord"
+Name = "Player Coord"
+Description = "A minimal, draggable coordinate overlay showing player position and zone."
+Author = "mrkoo"
+Version = "1.0"
+Environment = "4.0"
+
+RunOnStartup = {
+    "Main.lua"
+}
