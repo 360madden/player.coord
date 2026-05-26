@@ -1,0 +1,14 @@
+# RIFT addon development
+*.zip
+*.rar
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
