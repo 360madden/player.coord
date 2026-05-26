@@ -1,0 +1,40 @@
+name: CI
+
+# Run on all pushes and pull requests
+on:
+  push:
+  pull_request:
+
+# Prevent duplicate runs on push+PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Lua Linting ──────────────────────────────────────────
+  lint:
+    name: Luacheck Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Luacheck
+        uses: lunarmodules/luacheck@v1
+        with:
+          args: . --config .luacheckrc
+
+  # ── Lua Formatting ───────────────────────────────────────
+  format:
+    name: StyLua Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run StyLua (check mode)
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v0.20.0
+          args: --check Interface/

@@ -1,0 +1,24 @@
+# StyLua configuration for RIFT MMO addon
+# https://github.com/JohnnyMorganz/StyLua
+
+# Lua version used by RIFT
+syntax = "Lua51"
+
+# Indentation
+indent_type = "Spaces"
+indent_width = 4
+
+# Line endings (Windows uses CRLF, but we standardize on LF)
+line_endings = "Unix"
+
+# Column width - keep reasonable for game addons
+column_width = 140
+
+# Quote style
+quote_style = "AutoPreferDouble"
+
+# No trailing commas
+no_call_parentheses = false
+
+# Sort requires (not applicable for RIFT addons since they don't use require)
+sort_requires = false

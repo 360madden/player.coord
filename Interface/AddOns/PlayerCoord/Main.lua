@@ -9,7 +9,6 @@ local PlayerCoord = PlayerCoord or {}
 local self = PlayerCoord
 
 -- Constants
-local ADDON_NAME      = "PlayerCoord"
 local ADDON_IDENTIFIER = "PlayerCoord"
 
 -- ---------------------------------------------------------------------------
@@ -26,7 +25,6 @@ end
 local COLORS = {
     bg_dark        = { 0.04, 0.04, 0.06, 0.88 },
     bg_header      = { 0.06, 0.06, 0.10, 0.92 },
-    border_glow    = { 0.18, 0.15, 0.22, 0.60 },
     border_accent  = { 0.85, 0.60, 0.15, 1.0 },
     divider        = { 0.25, 0.20, 0.30, 0.50 },
     text_primary   = { 0.95, 0.95, 1.0 },
@@ -503,6 +501,9 @@ end
 -- Initialize the addon
 -- ---------------------------------------------------------------------------
 local function Initialize()
+    if self._initialized then return end
+    self._initialized = true
+
     pcall(function() self:BuildUI()              end)
     pcall(function() self:RegisterEvents()        end)
     pcall(function() self:RegisterSlashCommands() end)
@@ -510,17 +511,14 @@ local function Initialize()
     print("|cFFD9A514[PlayerCoord]|r |cFF66CC88Loaded!|r Use |cFFFFAA00/pcoord|r to toggle. Drag the title bar to move.")
 end
 
--- Hook into the startup end event (fires when all addons are loaded)
+-- Hook into the addon load end event (fires when a specific addon finishes loading)
 Command.Event.Attach(Event.Addon.Load.End, function(event, addonName)
     if addonName == ADDON_IDENTIFIER then
         Initialize()
     end
 end, ADDON_IDENTIFIER .. "_Load")
 
--- Fallback: also initialize on Startup.End for robustness
+-- Fallback: also initialize on Startup.End (fires once for all addons)
 Command.Event.Attach(Event.Addon.Startup.End, function()
-    if not self._initialized then
-        self._initialized = true
-        Initialize()
-    end
+    Initialize()
 end, ADDON_IDENTIFIER .. "_Startup")
