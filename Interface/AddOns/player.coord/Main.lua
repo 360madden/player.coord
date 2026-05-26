@@ -5,12 +5,13 @@
 --   /pcoord show | hide  — show or hide the overlay
 --   /pcoord reset         — restore default position (center of screen)
 --   /pcoord opacity <n>   — set window opacity (0.05–1.0)
+--   /pcoord tooltips on|off — toggle raw coordinate tooltips
 --   /pcoord version       — print the current addon version
 -- Drag the title bar to reposition (position saved between sessions).
 -- =============================================================================
 
 local ADDON = "player.coord"
-local VERSION = "2.0"
+local VERSION = "2.1"
 
 -- ---------------------------------------------------------------------------
 -- Safe default helper
@@ -41,6 +42,7 @@ local dragSX, dragSY, dragOX, dragOY = 0, 0, 0, 0
 
 local coordX, coordY, coordZ = 0, 0, 0
 local zoneName = "Unknown"
+local zoneId = nil
 
 -- ---------------------------------------------------------------------------
 -- Settings (persisted via SavedVariables)
@@ -81,6 +83,7 @@ local function InitSettings()
     settings.posX = fallback(settings.posX, -1)
     settings.posY = fallback(settings.posY, -1)
     settings.opacity = fallback(settings.opacity, 0.90)
+    settings.showTooltips = fallback(settings.showTooltips, true)
 end
 
 local function ResetPosition()
@@ -214,6 +217,20 @@ local function BuildUI()
     lblZone:SetFontSize(11)
     lblZone:SetFontColor(0.88, 0.60, 0.15)
     lblZone:SetPoint("TOPCENTER", win, "TOPCENTER", 0, -HH - 6)
+    lblZone:SetMouseMasking("mouse")
+
+    -- Tooltip: show internal zone ID on hover
+    lblZone:EventAttach(Event.UI.Input.Mouse.Cursor.In, function()
+        if settings.showTooltips and zoneId then
+            Tooltip.Clear()
+            Tooltip.AddText(ADDON, "Zone ID: " .. tostring(zoneId))
+            Tooltip.Show(ADDON, lblZone)
+        end
+    end, ADDON .. "ZoneTooltipIn")
+
+    lblZone:EventAttach(Event.UI.Input.Mouse.Cursor.Out, function()
+        Tooltip.Clear()
+    end, ADDON .. "ZoneTooltipOut")
 
     -- Coordinate rows
     local function MakeCoordRow(parent, anchor, labelText, indent)
@@ -228,6 +245,7 @@ local function BuildUI()
         value:SetFontSize(12)
         value:SetFontColor(0.25, 0.82, 0.60)
         value:SetPoint("LEFT", label, "RIGHT", 8, 0)
+        value:SetMouseMasking("mouse")
 
         return label, value
     end
@@ -235,6 +253,30 @@ local function BuildUI()
     local lblLabelX, lblCoordX = MakeCoordRow(win, lblZone, "X", 32)
     local lblLabelY, lblCoordY = MakeCoordRow(win, lblLabelX, "Y", 0)
     local lblLabelZ, lblCoordZ = MakeCoordRow(win, lblLabelY, "Z", 0)
+
+    -- Tooltip helper for coordinate value frames
+    local function AttachCoordTooltip(frame, coordKey)
+        frame:EventAttach(Event.UI.Input.Mouse.Cursor.In, function()
+            if not settings.showTooltips then return end
+            local raw
+            if coordKey == "X" then raw = coordX
+            elseif coordKey == "Y" then raw = coordY
+            elseif coordKey == "Z" then raw = coordZ end
+            if raw then
+                Tooltip.Clear()
+                Tooltip.AddText(ADDON, coordKey .. ": " .. tostring(raw))
+                Tooltip.Show(ADDON, frame)
+            end
+        end, ADDON .. "TooltipIn" .. coordKey)
+
+        frame:EventAttach(Event.UI.Input.Mouse.Cursor.Out, function()
+            Tooltip.Clear()
+        end, ADDON .. "TooltipOut" .. coordKey)
+    end
+
+    AttachCoordTooltip(lblCoordX, "X")
+    AttachCoordTooltip(lblCoordY, "Y")
+    AttachCoordTooltip(lblCoordZ, "Z")
 
     -- Drag events
     header:EventAttach(Event.UI.Input.Mouse.Left.Down, function()
@@ -328,6 +370,8 @@ local function OnCoordUpdate(_, units)
         if d then
             local z = d.zone or d.Zone or d.locationName
             if z and z ~= "" then zoneName = tostring(z) end
+            local zid = d.zoneID or d.zoneId or d.zone_id
+            if zid then zoneId = zid end
         end
     end)
 
@@ -345,8 +389,10 @@ local function OnZoneUpdate(_, units)
         local z = data.zone or data.locationName
         if z and z ~= "" then
             zoneName = tostring(z)
-            RefreshDisplay()
         end
+        local zid = data.zoneID or data.zoneId or data.zone_id
+        if zid then zoneId = zid end
+        RefreshDisplay()
     end)
 end
 
@@ -402,12 +448,26 @@ local function RegisterCommands()
                 print("|cFF55CC77[player.coord]|r Current opacity: " .. pct .. "%.")
                 print("  Usage: /pcoord opacity <0.05–1.0>")
             end
+        elseif arg == "tooltips" then
+            local val = tostring(args):match("^%S+%s+(%S+)")
+            if val then val = val:lower() end
+            if val == "on" then
+                settings.showTooltips = true
+                print("|cFF55CC77[player.coord]|r Raw coordinate tooltips enabled.")
+            elseif val == "off" then
+                settings.showTooltips = false
+                print("|cFF55CC77[player.coord]|r Raw coordinate tooltips disabled.")
+            else
+                local status = settings.showTooltips and "enabled" or "disabled"
+                print("|cFF55CC77[player.coord]|r Tooltips are currently " .. status .. ".")
+                print("  Usage: /pcoord tooltips on|off")
+            end
         elseif arg == "version" then
             print("|cFF55CC77[player.coord]|r Version |cFFE68A0A" .. VERSION .. "|r")
         else
             Toggle()
         end
-    end, "Toggle the coordinate overlay. Subcommands: show, hide, reset, opacity, version")
+    end, "Toggle the coordinate overlay. Subcommands: show, hide, reset, opacity, tooltips, version")
 
     Command.Slash.Register("playercoord", function(_)
         Toggle()
@@ -441,6 +501,8 @@ local function Init()
             coordZ = tonumber(d.coordZ or d.z or d.posZ) or 0
             local z = d.zone or d.Zone or d.locationName
             if z and z ~= "" then zoneName = tostring(z) end
+            local zid = d.zoneID or d.zoneId or d.zone_id
+            if zid then zoneId = zid end
         end
         RefreshDisplay()
     end)

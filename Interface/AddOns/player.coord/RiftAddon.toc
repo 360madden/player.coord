@@ -2,7 +2,7 @@ Identifier = "player.coord"
 Name = "Player Coord"
 Description = "A minimal draggable coordinate overlay. X/Y/Z coords, zone name, nothing else."
 Author = "mrkoo"
-Version = "2.0"
+Version = "2.1"
 Environment = "4.0"
 SavedVariables = { PlayerCoordSettings = "character" }
 
