@@ -20,14 +20,14 @@ local function default(val, fallback)
 end
 
 -- ---------------------------------------------------------------------------
--- Color Theme
+-- Color Theme  (R/G/B/A in 0.0-1.0 range)
 -- ---------------------------------------------------------------------------
 local COLORS = {
     bg_dark        = { 0.04, 0.04, 0.06, 0.88 },
     bg_header      = { 0.06, 0.06, 0.10, 0.92 },
-    border_accent  = { 0.85, 0.60, 0.15, 1.0 },
+    border_accent  = { 0.85, 0.60, 0.15, 1.00 },
     divider        = { 0.25, 0.20, 0.30, 0.50 },
-    text_primary   = { 0.95, 0.95, 1.0 },
+    text_primary   = { 0.95, 0.95, 1.00 },
     text_secondary = { 0.65, 0.65, 0.75 },
     text_accent    = { 0.90, 0.65, 0.20 },
     coord_value    = { 0.30, 0.85, 0.65 },
@@ -36,7 +36,7 @@ local COLORS = {
     btn_normal     = { 0.55, 0.55, 0.65 },
     btn_min_hover  = { 0.85, 0.60, 0.15 },
     btn_min_normal = { 0.55, 0.55, 0.65 },
-    shadow         = { 0.0,  0.0,  0.0,  0.40 },
+    shadow         = { 0.00, 0.00, 0.00, 0.40 },
 }
 
 -- ---------------------------------------------------------------------------
@@ -62,7 +62,6 @@ self.coordX       = 0
 self.coordY       = 0
 self.coordZ       = 0
 self.zoneName     = "Unknown"
-self.context      = nil   -- stores the UI context for anchoring
 
 -- ---------------------------------------------------------------------------
 -- Helper: Format a coordinate value
@@ -85,32 +84,54 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Event: Coordinate update (fires when player position changes)
+-- Event.Unit.Detail.Coord fires with (event, units) where units is a table
+-- mapping unitId -> coord data
 -- ---------------------------------------------------------------------------
-local function OnCoordUpdate(event, unitId)
-    -- If a unit specifier is provided, only care about the player
-    if unitId and unitId ~= "player" and not string.find(tostring(unitId), "player") then
-        return
+local function OnCoordUpdate(event, units)
+    if not units then return end
+
+    -- Check if player is in the update
+    local coordData = units["player"] or units["player.target"] or units.player
+    if not coordData then
+        -- Might be a flat update for just the player; try direct inspect
+        local detail = Inspect.Unit.Detail("player")
+        if not detail then return end
+        coordData = detail
     end
 
-    local detail = Inspect.Unit.Detail("player")
-    if not detail then return end
+    self.coordX = tonumber(coordData.coordX or coordData.x or coordData.posX) or self.coordX
+    self.coordY = tonumber(coordData.coordY or coordData.y or coordData.posY) or self.coordY
+    self.coordZ = tonumber(coordData.coordZ or coordData.z or coordData.posZ) or self.coordZ
 
-    -- Try multiple possible field names (defensive)
-    local x = detail.coordX or detail.CoordX or detail.x or detail.X or detail.posX or 0
-    local y = detail.coordY or detail.CoordY or detail.y or detail.Y or detail.posY or 0
-    local z = detail.coordZ or detail.CoordZ or detail.z or detail.Z or detail.posZ or 0
-
-    self.coordX = tonumber(x) or 0
-    self.coordY = tonumber(y) or 0
-    self.coordZ = tonumber(z) or 0
-
-    -- Update zone / location name if available
-    local zone = detail.zone or detail.Zone or detail.locationName
-    if zone and zone ~= "" then
-        self.zoneName = tostring(zone)
-    end
+    -- Zone name comes from a separate event (Event.Unit.Detail.Zone)
+    -- but we can also pull it fresh
+    pcall(function()
+        local detail = Inspect.Unit.Detail("player")
+        if detail then
+            local zone = detail.zone or detail.Zone or detail.locationName
+            if zone and zone ~= "" then
+                self.zoneName = tostring(zone)
+            end
+        end
+    end)
 
     self:RefreshDisplay()
+end
+
+-- ---------------------------------------------------------------------------
+-- Event: Zone changes
+-- ---------------------------------------------------------------------------
+local function OnZoneUpdate(event, units)
+    if not units then return end
+    pcall(function()
+        local zoneData = units["player"] or units.player
+        if not zoneData then return end
+        local zone = zoneData.zone or zoneData.locationName
+        if zone and zone ~= "" then
+            self.zoneName = tostring(zone)
+            self:RefreshDisplay()
+        end
+    end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -120,13 +141,9 @@ function self:RefreshDisplay()
     if not self.lblCoordX then return end
 
     pcall(function()
-        local xFormatted = formatCoord(self.coordX)
-        local yFormatted = formatCoord(self.coordY)
-        local zFormatted = formatCoord(self.coordZ)
-
-        if self.lblCoordX then self.lblCoordX:SetText(xFormatted) end
-        if self.lblCoordY then self.lblCoordY:SetText(yFormatted) end
-        if self.lblCoordZ then self.lblCoordZ:SetText(zFormatted) end
+        if self.lblCoordX then self.lblCoordX:SetText(formatCoord(self.coordX)) end
+        if self.lblCoordY then self.lblCoordY:SetText(formatCoord(self.coordY)) end
+        if self.lblCoordZ then self.lblCoordZ:SetText(formatCoord(self.coordZ)) end
         if self.lblZone   then self.lblZone:SetText(self.zoneName) end
     end)
 end
@@ -140,7 +157,6 @@ local function OnDragStart()
     self.dragOrigLeft = default(self.mainFrame:GetLeft(), 0)
     self.dragOrigTop  = default(self.mainFrame:GetTop(), 0)
 
-    -- Bring to front while dragging
     pcall(function()
         self.mainFrame:SetLayer(999)
     end)
@@ -157,7 +173,7 @@ local function OnDragStop()
 end
 
 -- ---------------------------------------------------------------------------
--- Drag: Mouse-move (system-level event)
+-- Drag: Mouse-move (system-level event, fires every frame)
 -- ---------------------------------------------------------------------------
 local function OnDragMove()
     if not self.isDragging then return end
@@ -169,28 +185,31 @@ local function OnDragMove()
     local newLeft = self.dragOrigLeft + deltaX
     local newTop  = self.dragOrigTop  + deltaY
 
-    -- Clamp to context bounds
-    local ctxW = WINDOW_WIDTH
-    local ctxH = WINDOW_HEIGHT
-    pcall(function()
-        if self.context then
-            ctxW = self.context:GetWidth() or ctxW
-            ctxH = self.context:GetHeight() or ctxH
-        end
-    end)
+    -- Clamp to screen bounds using UIParent
+    local screenW = default(UIParent:GetWidth(), 1920)
+    local screenH = default(UIParent:GetHeight(), 1080)
 
     local winW = default(self.mainFrame:GetWidth(), WINDOW_WIDTH)
     local winH = default(self.mainFrame:GetHeight(), WINDOW_HEIGHT)
 
-    newLeft = math.max(0, math.min(newLeft, ctxW - winW))
-    newTop  = math.max(0, math.min(newTop, ctxH - winH))
+    newLeft = math.max(0, math.min(newLeft, screenW - winW))
+    newTop  = math.max(0, math.min(newTop, screenH - winH))
 
-    -- Reposition using only SetPoint (ClearAll first for cleanliness)
     pcall(function()
         self.mainFrame:ClearAll()
         self.mainFrame:SetWidth(winW)
         self.mainFrame:SetHeight(winH)
-        self.mainFrame:SetPoint("TOPLEFT", self.context, "TOPLEFT", newLeft, newTop)
+        self.mainFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", newLeft, newTop)
+
+        -- Keep shadow frame aligned with main frame
+        if self.shadowFrame then
+            local shadowW = winW + 8
+            local shadowH = winH + 8
+            self.shadowFrame:ClearAll()
+            self.shadowFrame:SetWidth(shadowW)
+            self.shadowFrame:SetHeight(shadowH)
+            self.shadowFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", newLeft + 4, newTop - 4)
+        end
     end)
 end
 
@@ -263,6 +282,11 @@ function self:ToggleMinimize()
         if self.mainFrame then
             self.mainFrame:SetHeight(self.isMinimized and HEADER_HEIGHT or WINDOW_HEIGHT)
         end
+        if self.shadowFrame then
+            self.shadowFrame:SetHeight(
+                (self.isMinimized and HEADER_HEIGHT or WINDOW_HEIGHT) + 8
+            )
+        end
         if self.dividerFrame then
             self.dividerFrame:SetVisible(not self.isMinimized)
         end
@@ -276,24 +300,20 @@ end
 -- Build the UI
 -- ---------------------------------------------------------------------------
 function self:BuildUI()
-    -- Create the addon context (replaces UIParent / screen reference)
-    local context = UI.CreateContext(ADDON_IDENTIFIER .. "Context")
-    self.context = context
-
     -- ----- Shadow frame (behind main frame for depth effect) -----
-    self.shadowFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Shadow", context)
+    self.shadowFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Shadow", UIParent)
     self.shadowFrame:SetWidth(WINDOW_WIDTH + 8)
     self.shadowFrame:SetHeight(WINDOW_HEIGHT + 8)
     self.shadowFrame:SetBackgroundColor(unpack(COLORS.shadow))
-    self.shadowFrame:SetPoint("CENTER", context, "CENTER", 4, -4)
+    self.shadowFrame:SetPoint("CENTER", UIParent, "CENTER", 4, -4)
     self.shadowFrame:SetLayer(9)
 
     -- ----- Main container frame -----
-    self.mainFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Main", context)
+    self.mainFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Main", UIParent)
     self.mainFrame:SetWidth(WINDOW_WIDTH)
     self.mainFrame:SetHeight(WINDOW_HEIGHT)
     self.mainFrame:SetBackgroundColor(unpack(COLORS.bg_dark))
-    self.mainFrame:SetPoint("CENTER", context, "CENTER", 0, 0)
+    self.mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     self.mainFrame:SetLayer(10)
     self.mainFrame:SetMouseMasking("mouse")
     self.mainFrame:SetVisible(true)
@@ -388,17 +408,17 @@ function self:BuildUI()
     self.lblZone:SetPoint("TOPCENTER", self.contentFrame, "TOPCENTER", 0, 0)
 
     -- ----- Spacing -----
-    self.spacerFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Spacer", self.contentFrame)
-    self.spacerFrame:SetWidth(WINDOW_WIDTH)
-    self.spacerFrame:SetHeight(4)
-    self.spacerFrame:SetPoint("TOPLEFT", self.lblZone, "BOTTOMLEFT", 0, -2)
+    local spacerFrame = UI.CreateFrame("Frame", ADDON_IDENTIFIER .. "Spacer", self.contentFrame)
+    spacerFrame:SetWidth(WINDOW_WIDTH)
+    spacerFrame:SetHeight(4)
+    spacerFrame:SetPoint("TOPLEFT", self.lblZone, "BOTTOMLEFT", 0, -2)
 
     -- ----- X coordinate row -----
     self.lblLabelX = UI.CreateFrame("Text", ADDON_IDENTIFIER .. "LabelX", self.contentFrame)
     self.lblLabelX:SetText("X:")
     self.lblLabelX:SetFontSize(12)
     self.lblLabelX:SetFontColor(unpack(COLORS.coord_label))
-    self.lblLabelX:SetPoint("TOPLEFT", self.spacerFrame, "BOTTOMLEFT", 24, 0)
+    self.lblLabelX:SetPoint("TOPLEFT", spacerFrame, "BOTTOMLEFT", 24, 0)
 
     self.lblCoordX = UI.CreateFrame("Text", ADDON_IDENTIFIER .. "CoordX", self.contentFrame)
     self.lblCoordX:SetText("--")
@@ -432,29 +452,69 @@ function self:BuildUI()
     self.lblCoordZ:SetFontColor(unpack(COLORS.coord_value))
     self.lblCoordZ:SetPoint("LEFT", self.lblLabelZ, "RIGHT", 8, 0)
 
-    -- ----- Attach frame events -----
-    -- Header bar handles drag
-    self.headerFrame:EventAttach(Event.LeftDown,      OnDragStart, ADDON_IDENTIFIER .. "_DragStart")
-    self.headerFrame:EventAttach(Event.LeftUp,        OnDragStop,  ADDON_IDENTIFIER .. "_DragStopHdr")
-    self.headerFrame:EventAttach(Event.LeftUpoutside,  OnDragStop,  ADDON_IDENTIFIER .. "_DragStopOut")
+    -- =========================================================================
+    -- Attach frame events using correct RIFT API event names
+    -- Based on verified ImhoBags source code patterns
+    -- =========================================================================
+
+    -- Header bar handles drag (using verified event names)
+    self.headerFrame:EventAttach(
+        Event.UI.Input.Mouse.Left.Down,
+        OnDragStart,
+        ADDON_IDENTIFIER .. "_DragStart"
+    )
+    self.headerFrame:EventAttach(
+        Event.UI.Input.Mouse.Left.Up,
+        OnDragStop,
+        ADDON_IDENTIFIER .. "_DragStopHdr"
+    )
+    self.headerFrame:EventAttach(
+        Event.UI.Input.Mouse.Left.Upoutside,
+        OnDragStop,
+        ADDON_IDENTIFIER .. "_DragStopOut"
+    )
 
     -- Close button events
-    self.btnCloseBG:EventAttach(Event.LeftClick, function() self:Hide() end, ADDON_IDENTIFIER .. "_Close")
-    self.btnCloseBG:EventAttach(Event.MouseIn,   OnCloseEnter,          ADDON_IDENTIFIER .. "_CloseIn")
-    self.btnCloseBG:EventAttach(Event.MouseOut,  OnCloseLeave,          ADDON_IDENTIFIER .. "_CloseOut")
+    self.btnCloseBG:EventAttach(
+        Event.UI.Input.Mouse.Left.Click,
+        function() self:Hide() end,
+        ADDON_IDENTIFIER .. "_Close"
+    )
+    self.btnCloseBG:EventAttach(
+        Event.UI.Input.Mouse.Cursor.In,
+        OnCloseEnter,
+        ADDON_IDENTIFIER .. "_CloseIn"
+    )
+    self.btnCloseBG:EventAttach(
+        Event.UI.Input.Mouse.Cursor.Out,
+        OnCloseLeave,
+        ADDON_IDENTIFIER .. "_CloseOut"
+    )
 
     -- Minimize button events
-    self.btnMinBG:EventAttach(Event.LeftClick, function() self:ToggleMinimize() end, ADDON_IDENTIFIER .. "_Min")
-    self.btnMinBG:EventAttach(Event.MouseIn,   OnMinimizeEnter,                       ADDON_IDENTIFIER .. "_MinIn")
-    self.btnMinBG:EventAttach(Event.MouseOut,  OnMinimizeLeave,                       ADDON_IDENTIFIER .. "_MinOut")
+    self.btnMinBG:EventAttach(
+        Event.UI.Input.Mouse.Left.Click,
+        function() self:ToggleMinimize() end,
+        ADDON_IDENTIFIER .. "_Min"
+    )
+    self.btnMinBG:EventAttach(
+        Event.UI.Input.Mouse.Cursor.In,
+        OnMinimizeEnter,
+        ADDON_IDENTIFIER .. "_MinIn"
+    )
+    self.btnMinBG:EventAttach(
+        Event.UI.Input.Mouse.Cursor.Out,
+        OnMinimizeLeave,
+        ADDON_IDENTIFIER .. "_MinOut"
+    )
 
     -- Initial coordinate fetch
     pcall(function()
         local detail = Inspect.Unit.Detail("player")
         if detail then
-            self.coordX = tonumber(detail.coordX or detail.CoordX or detail.x or detail.X or detail.posX) or 0
-            self.coordY = tonumber(detail.coordY or detail.CoordY or detail.y or detail.Y or detail.posY) or 0
-            self.coordZ = tonumber(detail.coordZ or detail.CoordZ or detail.z or detail.Z or detail.posZ) or 0
+            self.coordX = tonumber(detail.coordX or detail.x or detail.posX) or 0
+            self.coordY = tonumber(detail.coordY or detail.y or detail.posY) or 0
+            self.coordZ = tonumber(detail.coordZ or detail.z or detail.posZ) or 0
             local zone = detail.zone or detail.Zone or detail.locationName
             if zone and zone ~= "" then
                 self.zoneName = tostring(zone)
@@ -469,10 +529,25 @@ end
 -- ---------------------------------------------------------------------------
 function self:RegisterEvents()
     -- Coordinate updates from the game engine
-    Command.Event.Attach(Event.Unit.Detail.Coord, OnCoordUpdate, ADDON_IDENTIFIER .. "_CoordUpdate")
+    Command.Event.Attach(
+        Event.Unit.Detail.Coord,
+        OnCoordUpdate,
+        ADDON_IDENTIFIER .. "_CoordUpdate"
+    )
+
+    -- Zone changes
+    Command.Event.Attach(
+        Event.Unit.Detail.Zone,
+        OnZoneUpdate,
+        ADDON_IDENTIFIER .. "_ZoneUpdate"
+    )
 
     -- Global mouse-move for smooth dragging
-    Command.Event.Attach(Event.Mouse.Move, OnDragMove, ADDON_IDENTIFIER .. "_DragMove")
+    Command.Event.Attach(
+        Event.Mouse.Move,
+        OnDragMove,
+        ADDON_IDENTIFIER .. "_DragMove"
+    )
 end
 
 -- ---------------------------------------------------------------------------
@@ -511,14 +586,17 @@ local function Initialize()
     print("|cFFD9A514[PlayerCoord]|r |cFF66CC88Loaded!|r Use |cFFFFAA00/pcoord|r to toggle. Drag the title bar to move.")
 end
 
--- Hook into the addon load end event (fires when a specific addon finishes loading)
+-- Hook into addon load end event
 Command.Event.Attach(Event.Addon.Load.End, function(event, addonName)
     if addonName == ADDON_IDENTIFIER then
         Initialize()
     end
 end, ADDON_IDENTIFIER .. "_Load")
 
--- Fallback: also initialize on Startup.End (fires once for all addons)
+-- Fallback: also initialize on Startup.End
 Command.Event.Attach(Event.Addon.Startup.End, function()
     Initialize()
 end, ADDON_IDENTIFIER .. "_Startup")
+
+-- Direct call: if events have already fired, this is a no-op due to _initialized guard
+Initialize()

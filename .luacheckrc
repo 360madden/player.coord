@@ -20,6 +20,9 @@ globals = {
     -- UI creation
     "UI",
 
+    -- Screen root (verified in ImhoBags source)
+    "UIParent",
+
     -- Commands
     "Command",
 
@@ -32,6 +35,9 @@ globals = {
     -- Libraries
     "LibStub",
     "Library",
+
+    -- Utility (used by some RIFT addons for event creation)
+    "Utility",
 }
 
 -- Disable "unused variable" warnings for common event handler patterns
